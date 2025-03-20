@@ -1,0 +1,1 @@
+WinPos.exe --uninstall
