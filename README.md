@@ -1,1 +1,1 @@
-# WinPos
+A simple windows position manager
