@@ -4,10 +4,18 @@ namespace WinPos;
 
 public partial class MainForm : Form
 {
+    private bool[] _modifiers;
+    private uint _key = VK_SUBTRACT;
+    private Keys _keyCode;
+
     public MainForm()
     {
         InitializeComponent();
+        _modifiers = [btnCtrl.Checked, btnShift.Checked, btnWin.Checked, btnAlt.Checked];
+        _keyCode = Keys.Subtract;
+
         InitializeTrayIcon();
+
         WindowPositionManager.LoadFromDisk();
     }
 
@@ -25,7 +33,7 @@ public partial class MainForm : Form
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
-        WindowPositionManager.RegisterHotKey(Handle);
+        WindowPositionManager.RegisterHotKey(Handle, false, true, true, false, _key);
     }
 
     protected override void OnShown(EventArgs e)
@@ -57,6 +65,12 @@ public partial class MainForm : Form
     private void InitializeTrayIcon()
     {
         notifyIcon1.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+
+        notifyIcon1.Text =
+            $"{string.Join(" + ", _modifiers.Select((m, i) => m ?
+            new[] { "Ctrl", "Shift", "Win", "Alt" }[i] : null)
+            .Where(m => m != null))} + {_keyCode}";
+
         notifyIcon1.DoubleClick += NotifyIcon_DoubleClick;
 
         var contextMenu = new ContextMenuStrip();
@@ -70,6 +84,41 @@ public partial class MainForm : Form
     {
         Show();
         WindowState = FormWindowState.Normal;
+    }
+
+    private void TxtKey_KeyDown(object sender, KeyEventArgs e)
+    {
+        txtKey.Text = $"+ {e.KeyCode}";
+        _key = (uint)e.KeyValue;
+    }
+
+    private void BtnOK_Click(object sender, EventArgs e)
+    {
+        UnregisterHotKey(Handle, WindowPositionManager.HOTKEY_ID);
+
+        WindowPositionManager.RegisterHotKey(Handle,
+            btnCtrl.Checked, btnShift.Checked, btnWin.Checked, btnAlt.Checked, _key);
+
+        _modifiers = [btnCtrl.Checked, btnShift.Checked, btnWin.Checked, btnAlt.Checked];
+        _keyCode = Enum.Parse<Keys>(txtKey.Text.TrimStart(['+', ' ']));
+
+        notifyIcon1.Text =
+            $"{string.Join(" + ", _modifiers.Select((m, i) => m ?
+            new[] { "Ctrl", "Shift", "Win", "Alt" }[i] : null)
+            .Where(m => m != null))} + {_keyCode}";
+
+        Hide();
+    }
+
+    private void BtnCancel_Click(object sender, EventArgs e)
+    {
+        btnCtrl.Checked = _modifiers[0];
+        btnShift.Checked = _modifiers[1];
+        btnWin.Checked = _modifiers[2];
+        btnAlt.Checked = _modifiers[3];
+        txtKey.Text = $"+ {_keyCode}";
+
+        Hide();
     }
 
     public class WindowInfo
@@ -102,5 +151,11 @@ public partial class MainForm : Form
             Right = Right,
             Bottom = Bottom
         };
+    }
+
+    private void Btn_CheckedChanged(object sender, EventArgs e)
+    {
+        ToolStripButton button = ((ToolStripButton)sender);
+        button.ForeColor = button.Checked ? Color.Black : Color.Gray;
     }
 }

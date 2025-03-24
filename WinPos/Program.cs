@@ -10,9 +10,9 @@ namespace WinPos
         [STAThread]
         static void Main(string[] args)
         {
-#if DEBUG
-            Debugger.Launch();
-#endif
+//#if DEBUG
+//            Debugger.Launch();
+//#endif
 
             // Kill app if already running
             Process currentProcess = Process.GetCurrentProcess();
@@ -26,15 +26,11 @@ namespace WinPos
             {
                 if (args.Length > 0 && args[0] == "--uninstall")
                 {
-                    if (MessageBox.Show("Remove from startup apps?", "Uninstall",
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-                    {
-                        // Remove startup and scheduled task
-                        //StartupInstaller.ConfigureStartup(false);
-                        StartupInstaller.DeleteScheduledTask();
-                        MessageBox.Show("Application uninstalled successfully!");
-                        Application.Exit();
-                    }
+                    // Remove startup and scheduled task
+                    //StartupInstaller.ConfigureStartup(false);
+                    StartupInstaller.DeleteScheduledTask();
+                    //MessageBox.Show("Application uninstalled successfully!");
+                    Application.Exit();
 
                     return;
                 }

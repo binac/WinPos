@@ -1,6 +1,7 @@
 ﻿using Microsoft.Win32;
 using System.Diagnostics;
 using System.Security.Principal;
+using System.Text.RegularExpressions;
 
 namespace WinPos;
 
@@ -19,8 +20,8 @@ class StartupInstaller
     {
         try
         {
-            string appPath = Process.GetCurrentProcess().MainModule.FileName;
-            string appName = Path.GetFileNameWithoutExtension(appPath);
+            string? appPath = Environment.ProcessPath;
+            string? appName = Path.GetFileNameWithoutExtension(appPath);
 
             using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(
                 "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", true))
@@ -73,10 +74,18 @@ class StartupInstaller
     {
         try
         {
-            string appPath = Process.GetCurrentProcess().MainModule.FileName;
+            string? appPath = Environment.ProcessPath;
             string taskName = "WindowPositionManager";
 
             string xmlPath = "WindowPositionManager.xml";
+
+            string xml = File.ReadAllText(xmlPath);
+            xml = xml.Replace("<UserId></UserId>", $"<UserId>{WindowsIdentity.GetCurrent().User.Value}</UserId>");
+            xml = Regex.Replace(xml, $@"<Exec>[\r\n\s]*<Command>""WinPos.exe""</Command>[\r\n\s]*<Arguments>""-minimized""</Arguments>[\r\n\s]*<WorkingDirectory>/</WorkingDirectory>[\r\n\s]*</Exec>",
+                $"<Exec>\r\n      <Command>\"{Environment.ProcessPath}\"</Command>\r\n      <Arguments>\"-minimized\"</Arguments>\r\n      <WorkingDirectory>{Environment.CurrentDirectory}</WorkingDirectory>\r\n    </Exec>");
+
+            xmlPath = $"{Path.GetTempPath()}{xmlPath}";
+            File.WriteAllText(xmlPath, xml);
 
             ProcessStartInfo psi = new ProcessStartInfo
             {

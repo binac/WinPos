@@ -25,14 +25,17 @@ namespace WinPos
             excludedProcesses = File.ReadAllLines("excluded_processes.txt");
         }
 
-        internal static void RegisterHotKey(IntPtr handle)
+        internal static void RegisterHotKey(IntPtr handle,
+            bool ctrl, bool shift, bool win, bool alt, uint key)
         {
-            if (!NativeMethods.RegisterHotKey(handle, HOTKEY_ID,
-                MOD_WIN | MOD_SHIFT,
-                VK_SUBTRACT))
-            {
+            uint modifiers = 0;
+            modifiers |= ctrl ? MOD_CONTROL : 0;
+            modifiers |= shift ? MOD_SHIFT : 0;
+            modifiers |= win ? MOD_WIN : 0;
+            modifiers |= alt ? MOD_ALT : 0;
+
+            if (!NativeMethods.RegisterHotKey(handle, HOTKEY_ID, modifiers, key))
                 MessageBox.Show("Failed to register hotkey");
-            }
         }
 
         internal static void SaveWindowPositions()
