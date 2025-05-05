@@ -123,7 +123,7 @@
             txtKey.Font = new Font("Segoe UI", 11F);
             txtKey.Name = "txtKey";
             txtKey.ReadOnly = true;
-            txtKey.Size = new Size(85, 27);
+            txtKey.Size = new Size(85, 33);
             txtKey.Text = "+ Subtract";
             txtKey.KeyDown += TxtKey_KeyDown;
             // 

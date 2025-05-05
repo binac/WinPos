@@ -34,8 +34,15 @@ namespace WinPos
             modifiers |= win ? MOD_WIN : 0;
             modifiers |= alt ? MOD_ALT : 0;
 
-            if (!NativeMethods.RegisterHotKey(handle, HOTKEY_ID, modifiers, key))
+            try
+            {
+                if (!NativeMethods.RegisterHotKey(handle, HOTKEY_ID, modifiers, key))
+                    throw new InvalidOperationException();
+            }
+            catch (Exception)
+            {
                 MessageBox.Show("Failed to register hotkey");
+            }
         }
 
         internal static void SaveWindowPositions()
@@ -165,7 +172,10 @@ namespace WinPos
                     w.ExecutableName
                 )).ToList();
 
-                string savePath = Path.GetTempPath() + "WinPos\\windowPositions.xml";
+                string savePath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    Application.ProductName, "windowPositions.xml");
+
                 Directory.CreateDirectory(Path.GetDirectoryName(savePath));
 
                 using (var writer = new StreamWriter(savePath))
@@ -182,10 +192,10 @@ namespace WinPos
 
         internal static void LoadFromDisk()
         {
-            string path = Path.GetTempPath() + "WinPos\\windowPositions.xml";
-
             try
             {
+                string path = Path.GetTempPath() + "WinPos\\windowPositions.xml";
+
                 using (var reader = new StreamReader(path))
                 {
                     var serializer = new XmlSerializer(typeof(List<WindowInfo>));

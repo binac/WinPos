@@ -10,11 +10,11 @@ namespace WinPos
         [STAThread]
         static void Main(string[] args)
         {
-//#if DEBUG
-//            Debugger.Launch();
-//#endif
+            //#if DEBUG
+            //            Debugger.Launch();
+            //#endif
 
-            // Kill app if already running
+            // Kill app if already running. Preserve the current instance.
             Process currentProcess = Process.GetCurrentProcess();
             foreach (Process process in Process.GetProcessesByName(currentProcess.ProcessName))
                 if (process.Id != currentProcess.Id)
@@ -26,24 +26,23 @@ namespace WinPos
             {
                 if (args.Length > 0 && args[0] == "--uninstall")
                 {
-                    // Remove startup and scheduled task
-                    //StartupInstaller.ConfigureStartup(false);
+                    // Remove scheduled task
                     StartupInstaller.DeleteScheduledTask();
-                    //MessageBox.Show("Application uninstalled successfully!");
                     Application.Exit();
-
                     return;
                 }
 
                 if (!StartupInstaller.QueryScheduledTask())
                 {
-                    // Configure startup and scheduled task
-                    //StartupInstaller.ConfigureStartup(true);
+                    // Configure scheduled task
                     StartupInstaller.CreateScheduledTask();
                     MessageBox.Show("Application installed successfully!");
                     Application.Exit();
-                    //return;
                 }
+
+                string appPath = Application.ExecutablePath; // Path to the current executable
+                string appName = Application.ProductName ?? "WinPos"; // Ensure appName is not null
+                StartupInstaller.CreateStartMenuShortcut(appName, appPath, "Save and restore window positions.");
             }
 
             Application.Run(new MainForm());

@@ -155,7 +155,7 @@ public partial class MainForm : Form
 
     private void Btn_CheckedChanged(object sender, EventArgs e)
     {
-        ToolStripButton button = ((ToolStripButton)sender);
+        ToolStripButton button = (ToolStripButton)sender;
         button.ForeColor = button.Checked ? Color.Black : Color.Gray;
     }
 }

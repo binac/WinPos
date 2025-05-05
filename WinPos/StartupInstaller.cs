@@ -15,33 +15,6 @@ class StartupInstaller
         return principal.IsInRole(WindowsBuiltInRole.Administrator);
     }
 
-    // Add this method to install/uninstall startup entry
-    internal static void ConfigureStartup(bool install)
-    {
-        try
-        {
-            string? appPath = Environment.ProcessPath;
-            string? appName = Path.GetFileNameWithoutExtension(appPath);
-
-            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(
-                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", true))
-            {
-                if (install)
-                {
-                    key.SetValue(appName, $"\"{appPath}\" -minimized");
-                }
-                else
-                {
-                    key.DeleteValue(appName, false);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Failed to configure startup: {ex.Message}");
-        }
-    }
-
     // Add this method to create a scheduled task for elevated privileges
     internal static bool QueryScheduledTask()
     {
@@ -118,6 +91,25 @@ class StartupInstaller
             })?.WaitForExit();
         }
         catch { /* Ignore if task doesn't exist */ }
+    }
+
+    public static void CreateStartMenuShortcut(string appName, string appPath, string description = "")
+    {
+        // Get the Start Menu folder path
+        string startMenuPath = Environment.GetFolderPath(Environment.SpecialFolder.StartMenu);
+        string shortcutPath = Path.Combine(startMenuPath, "Programs", $"{appName}.lnk");
+
+        // Check if the shortcut already exists
+        if (!File.Exists(shortcutPath))
+        {
+            // Create the shortcut
+            IWshRuntimeLibrary.WshShell shell = new();
+            IWshRuntimeLibrary.IWshShortcut shortcut = (IWshRuntimeLibrary.IWshShortcut)shell.CreateShortcut(shortcutPath);
+            shortcut.TargetPath = appPath; // Path to the application
+            shortcut.WorkingDirectory = Path.GetDirectoryName(appPath);
+            shortcut.Description = description; // Optional description
+            shortcut.Save();
+        }
     }
 }
 
