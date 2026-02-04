@@ -1,5 +1,4 @@
-﻿using Microsoft.Win32;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Security.Principal;
 using System.Text.RegularExpressions;
 
@@ -7,6 +6,11 @@ namespace WinPos;
 
 class StartupInstaller
 {
+    // Cached compiled regex for better performance
+    private static readonly Regex ExecBlockRegex = new(
+        @"<Exec>[\r\n\s]*<Command>""WinPos.exe""</Command>[\r\n\s]*<Arguments>""-minimized""</Arguments>[\r\n\s]*<WorkingDirectory>/</WorkingDirectory>[\r\n\s]*</Exec>",
+        RegexOptions.Compiled);
+
     // Add this method to check for admin privileges
     internal static bool IsRunningAsAdmin()
     {
@@ -53,8 +57,8 @@ class StartupInstaller
             string xmlPath = "WindowPositionManager.xml";
 
             string xml = File.ReadAllText(xmlPath);
-            xml = xml.Replace("<UserId></UserId>", $"<UserId>{WindowsIdentity.GetCurrent().User.Value}</UserId>");
-            xml = Regex.Replace(xml, $@"<Exec>[\r\n\s]*<Command>""WinPos.exe""</Command>[\r\n\s]*<Arguments>""-minimized""</Arguments>[\r\n\s]*<WorkingDirectory>/</WorkingDirectory>[\r\n\s]*</Exec>",
+            xml = xml.Replace("<UserId></UserId>", $"<UserId>{WindowsIdentity.GetCurrent().User!.Value}</UserId>");
+            xml = ExecBlockRegex.Replace(xml,
                 $"<Exec>\r\n      <Command>\"{Environment.ProcessPath}\"</Command>\r\n      <Arguments>\"-minimized\"</Arguments>\r\n      <WorkingDirectory>{Environment.CurrentDirectory}</WorkingDirectory>\r\n    </Exec>");
 
             xmlPath = $"{Path.GetTempPath()}{xmlPath}";
@@ -110,6 +114,18 @@ class StartupInstaller
             shortcut.Description = description; // Optional description
             shortcut.Save();
         }
+    }
+
+    internal static void DeleteStartMenuShortcut(string appName)
+    {
+        try
+        {
+            string startMenuPath = Environment.GetFolderPath(Environment.SpecialFolder.StartMenu);
+            string shortcutPath = Path.Combine(startMenuPath, "Programs", $"{appName}.lnk");
+
+            File.Delete(shortcutPath);
+        }
+        catch (Exception) { }
     }
 }
 

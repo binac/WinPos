@@ -1,14 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Reflection.Metadata;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading.Tasks;
+using System.Xml.Serialization;
 using static WinPos.MainForm;
 using static WinPos.NativeMethods;
-using System.Xml.Serialization;
 
 namespace WinPos
 {
@@ -17,12 +12,23 @@ namespace WinPos
         private static List<WindowInfo>? _savedWindows;
         internal static int HOTKEY_ID = 1;
 
-        private static string[] excludedProcesses, excludedTitles;
+        // Use HashSet for O(1) lookups instead of array with O(n) Contains/Any
+        private static readonly HashSet<string> excludedProcesses;
+        private static readonly string[] excludedTitles;
+        
+        // Use Lazy<T> to defer costly XmlSerializer reflection until first use
+        private static readonly Lazy<XmlSerializer> _windowInfoSerializer = 
+            new(() => new XmlSerializer(typeof(List<WindowInfo>)), LazyThreadSafetyMode.PublicationOnly);
+        
+        // Reusable StringBuilder to reduce allocations
+        [ThreadStatic]
+        private static StringBuilder? _windowTextBuffer;
 
         static WindowPositionManager()
         {
-            excludedTitles = File.ReadAllLines("excluded_titles.txt");
-            excludedProcesses = File.ReadAllLines("excluded_processes.txt");
+            excludedTitles = File.Exists("excluded_titles.txt") ? File.ReadAllLines("excluded_titles.txt") : [];
+            excludedProcesses = File.Exists("excluded_processes.txt") ?
+                new HashSet<string>(File.ReadAllLines("excluded_processes.txt"), StringComparer.OrdinalIgnoreCase) : [];
         }
 
         internal static void RegisterHotKey(IntPtr handle,
@@ -47,7 +53,8 @@ namespace WinPos
 
         internal static void SaveWindowPositions()
         {
-            _savedWindows = new List<WindowInfo>();
+            var savedWindows = new List<WindowInfo>();
+            
             EnumWindows((hWnd, lParam) =>
             {
                 if (!IsWindowVisible(hWnd)) return true;
@@ -58,21 +65,24 @@ namespace WinPos
 
                 if (placement.showCmd != SW_SHOWMINIMIZED)
                 {
-                    string windowText = GetWindowText(hWnd);
+                    string windowText = GetWindowTextOptimized(hWnd);
 
-                    if (windowText != null && windowText.Length >= 5 && !excludedTitles.Any(t => windowText.StartsWith(t)))
+                    if (windowText.Length >= 5 &&
+                    !excludedTitles.Any(t => windowText.StartsWith(t, StringComparison.Ordinal)))
                     {
+                        Debug.WriteLine($"Window: {windowText}");
                         GetWindowRect(hWnd, out RECT rect);
                         string exeName = GetProcessNameFromWindow(hWnd);
 
                         if (!excludedProcesses.Contains(exeName))
-                            _savedWindows.Add(new WindowInfo(hWnd, rect, windowText, exeName));
+                            savedWindows.Add(new WindowInfo(hWnd, rect, windowText, exeName));
                     }
                 }
 
                 return true;
             }, IntPtr.Zero);
 
+            _savedWindows = savedWindows;
             SaveToDisk();
         }
 
@@ -85,40 +95,66 @@ namespace WinPos
             EnumWindows((hWnd, lParam) =>
             {
                 // Collect current window information
-                string windowText = GetWindowText(hWnd);
+                string windowText = GetWindowTextOptimized(hWnd);
                 string exeName = GetProcessNameFromWindow(hWnd);
 
-                if (windowText != null && windowText.Length >= 5 && !string.IsNullOrEmpty(exeName)
+                if (windowText.Length >= 5 && !string.IsNullOrEmpty(exeName)
                     && GetWindowRect(hWnd, out RECT rect))
                     currentWindows.Add(new WindowInfo(hWnd, rect, windowText, exeName));
 
                 return true;
             }, IntPtr.Zero);
 
+            // Pre-calculate window placement struct size once
+            int placementSize = Marshal.SizeOf(typeof(WINDOWPLACEMENT));
+
             foreach (var savedWindow in _savedWindows)
             {
-                // Find matching windows by title and executable name
-                var matches = currentWindows.Where(w => w.ExecutableName == savedWindow.ExecutableName &&
-                    w.WindowTitle != null && w.WindowTitle.StartsWith(savedWindow.WindowTitle.Substring(0, 5))
-                ).ToList();
+                // Cache the prefix for matching
+                string? savedTitlePrefix = savedWindow.WindowTitle?.Length >= 5 
+                    ? savedWindow.WindowTitle.Substring(0, 5) 
+                    : null;
+                    
+                if (savedTitlePrefix == null) continue;
 
-                foreach (var match in matches)
+                foreach (var match in currentWindows)
                 {
-                    SetWindowPlacement(match.Handle, new WINDOWPLACEMENT
+                    if (match.ExecutableName == savedWindow.ExecutableName &&
+                        match.WindowTitle != null && 
+                        match.WindowTitle.StartsWith(savedTitlePrefix, StringComparison.Ordinal))
                     {
-                        length = Marshal.SizeOf(typeof(WINDOWPLACEMENT)),
-                        flags = 0,
-                        showCmd = SW_SHOWNORMAL,
-                        rcNormalPosition = match.Rect
-                    });
+                        SetWindowPlacement(match.Handle, new WINDOWPLACEMENT
+                        {
+                            length = placementSize,
+                            flags = 0,
+                            showCmd = SW_SHOWNORMAL,
+                            rcNormalPosition = match.Rect
+                        });
 
-                    var res = SetWindowPos(match.Handle, IntPtr.Zero,
-                        savedWindow.Left, savedWindow.Top,
-                        savedWindow.Right - savedWindow.Left,
-                        savedWindow.Bottom - savedWindow.Top,
-                        SWP_NOZORDER | SWP_NOACTIVATE);
+                        SetWindowPos(match.Handle, IntPtr.Zero,
+                            savedWindow.Left, savedWindow.Top,
+                            savedWindow.Right - savedWindow.Left,
+                            savedWindow.Bottom - savedWindow.Top,
+                            SWP_NOZORDER | SWP_NOACTIVATE);
+                    }
                 }
             }
+        }
+        
+        private static string GetWindowTextOptimized(nint hWnd)
+        {
+            int length = GetWindowTextLength(hWnd);
+            if (length == 0) return string.Empty;
+            
+            // Reuse StringBuilder when possible
+            _windowTextBuffer ??= new StringBuilder(256);
+            
+            if (_windowTextBuffer.Capacity < length + 1)
+                _windowTextBuffer.Capacity = length + 1;
+            
+            _windowTextBuffer.Clear();
+            NativeMethods.GetWindowText(hWnd, _windowTextBuffer, length + 1);
+            return _windowTextBuffer.ToString();
         }
 
         internal static string GetWindowText(nint hWnd)
@@ -135,8 +171,7 @@ namespace WinPos
 
             try
             {
-                uint processId;
-                GetWindowThreadProcessId(hWnd, out processId);
+                GetWindowThreadProcessId(hWnd, out uint processId);
                 processHandle = OpenProcess(ProcessAccessFlags.PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
 
                 if (processHandle == IntPtr.Zero)
@@ -146,7 +181,7 @@ namespace WinPos
                 int bufferSize = exePath.Capacity;
 
                 if (QueryFullProcessImageName(processHandle, 0, exePath, ref bufferSize))
-                    return Path.GetFileName(exePath.ToString()).ToLower();
+                    return Path.GetFileName(exePath.ToString()).ToLowerInvariant();
 
                 return "unknown";
             }
@@ -163,25 +198,19 @@ namespace WinPos
 
         internal static void SaveToDisk()
         {
+            if (_savedWindows == null) return;
+            
             try
             {
-                var dataToSave = _savedWindows.Select(w => new WindowInfo(
-                    w.Handle,
-                    w.Rect,
-                    w.WindowTitle,
-                    w.ExecutableName
-                )).ToList();
-
                 string savePath = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                     Application.ProductName, "windowPositions.xml");
 
-                Directory.CreateDirectory(Path.GetDirectoryName(savePath));
+                Directory.CreateDirectory(Path.GetDirectoryName(savePath)!);
 
                 using (var writer = new StreamWriter(savePath))
                 {
-                    var serializer = new XmlSerializer(typeof(List<WindowInfo>));
-                    serializer.Serialize(writer, dataToSave);
+                    _windowInfoSerializer.Value.Serialize(writer, _savedWindows);
                 }
             }
             catch (Exception ex)
@@ -196,12 +225,15 @@ namespace WinPos
             {
                 string path = Path.GetTempPath() + "WinPos\\windowPositions.xml";
 
+                if (!File.Exists(path)) return;
+
                 using (var reader = new StreamReader(path))
                 {
-                    var serializer = new XmlSerializer(typeof(List<WindowInfo>));
-                    var loadedData = (List<WindowInfo>)serializer.Deserialize(reader);
+                    var loadedData = (List<WindowInfo>?)_windowInfoSerializer.Value.Deserialize(reader);
 
-                    _savedWindows = new List<WindowInfo>();
+                    if (loadedData == null) return;
+
+                    _savedWindows = new List<WindowInfo>(loadedData.Count);
                     foreach (var w in loadedData)
                     {
                         _savedWindows.Add(new WindowInfo(
