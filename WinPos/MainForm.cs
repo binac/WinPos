@@ -71,6 +71,7 @@ public partial class MainForm : Form
             new[] { "Ctrl", "Shift", "Win", "Alt" }[i] : null)
             .Where(m => m != null))} + {_keyCode}";
 
+        notifyIcon1.Click += NotifyIcon_Click;
         notifyIcon1.DoubleClick += NotifyIcon_DoubleClick;
 
         var contextMenu = new ContextMenuStrip();
@@ -80,10 +81,19 @@ public partial class MainForm : Form
         notifyIcon1.ContextMenuStrip = contextMenu;
     }
 
+    private void NotifyIcon_Click(object? sender, EventArgs e)
+    {
+        if (((MouseEventArgs)e).Button == MouseButtons.Middle)
+            WindowPositionManager.RestoreWindowPositions();
+    }
+
     private void NotifyIcon_DoubleClick(object? sender, EventArgs? e)
     {
-        Show();
-        WindowState = FormWindowState.Normal;
+        if (((MouseEventArgs)e).Button == MouseButtons.Left)
+        {
+            Show();
+            WindowState = FormWindowState.Normal;
+        }
     }
 
     private void TxtKey_KeyDown(object sender, KeyEventArgs e)
@@ -130,10 +140,11 @@ public partial class MainForm : Form
         public int Bottom { get; set; }
         public string? WindowTitle { get; set; }
         public string? ExecutableName { get; set; }
+        public int ZOrder { get; set; }  // 0 = topmost, higher = further back
 
         public WindowInfo() { }
 
-        public WindowInfo(IntPtr handle, RECT rect, string title, string exeName)
+        public WindowInfo(IntPtr handle, RECT rect, string title, string exeName, int zOrder = 0)
         {
             Handle = handle;
             Left = rect.Left;
@@ -142,6 +153,7 @@ public partial class MainForm : Form
             Bottom = rect.Bottom;
             WindowTitle = title;
             ExecutableName = exeName;
+            ZOrder = zOrder;
         }
 
         public RECT Rect => new RECT

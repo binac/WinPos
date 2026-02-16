@@ -54,6 +54,7 @@ namespace WinPos
         internal static void SaveWindowPositions()
         {
             var savedWindows = new List<WindowInfo>();
+            int zOrderIndex = 0;  // Track Z-order position
             
             EnumWindows((hWnd, lParam) =>
             {
@@ -67,15 +68,15 @@ namespace WinPos
                 {
                     string windowText = GetWindowTextOptimized(hWnd);
 
-                    if (windowText.Length >= 5 &&
+                    if (windowText.Length >= 3 &&
                     !excludedTitles.Any(t => windowText.StartsWith(t, StringComparison.Ordinal)))
                     {
-                        Debug.WriteLine($"Window: {windowText}");
+                        Debug.WriteLine($"Window: {windowText} (Z-Order: {zOrderIndex})");
                         GetWindowRect(hWnd, out RECT rect);
                         string exeName = GetProcessNameFromWindow(hWnd);
 
                         if (!excludedProcesses.Contains(exeName))
-                            savedWindows.Add(new WindowInfo(hWnd, rect, windowText, exeName));
+                            savedWindows.Add(new WindowInfo(hWnd, rect, windowText, exeName, zOrderIndex++));
                     }
                 }
 
@@ -94,27 +95,27 @@ namespace WinPos
 
             EnumWindows((hWnd, lParam) =>
             {
-                // Collect current window information
                 string windowText = GetWindowTextOptimized(hWnd);
                 string exeName = GetProcessNameFromWindow(hWnd);
 
-                if (windowText.Length >= 5 && !string.IsNullOrEmpty(exeName)
+                if (windowText.Length >= 3 && !string.IsNullOrEmpty(exeName)
                     && GetWindowRect(hWnd, out RECT rect))
                     currentWindows.Add(new WindowInfo(hWnd, rect, windowText, exeName));
 
                 return true;
             }, IntPtr.Zero);
 
-            // Pre-calculate window placement struct size once
             int placementSize = Marshal.SizeOf(typeof(WINDOWPLACEMENT));
+
+            // Track matched windows with their target Z-order
+            var windowsToRestore = new List<(IntPtr Handle, WindowInfo SavedWindow)>();
 
             foreach (var savedWindow in _savedWindows)
             {
-                // Cache the prefix for matching
-                string? savedTitlePrefix = savedWindow.WindowTitle?.Length >= 5 
-                    ? savedWindow.WindowTitle.Substring(0, 5) 
+                string? savedTitlePrefix = savedWindow.WindowTitle?.Length >= 3 
+                    ? savedWindow.WindowTitle.Substring(0, Math.Min(5, savedWindow.WindowTitle.Length))
                     : null;
-                    
+            
                 if (savedTitlePrefix == null) continue;
 
                 foreach (var match in currentWindows)
@@ -123,21 +124,36 @@ namespace WinPos
                         match.WindowTitle != null && 
                         match.WindowTitle.StartsWith(savedTitlePrefix, StringComparison.Ordinal))
                     {
-                        SetWindowPlacement(match.Handle, new WINDOWPLACEMENT
+                        // Restore position
+                        var lpwndpl = new WINDOWPLACEMENT
                         {
                             length = placementSize,
                             flags = 0,
                             showCmd = SW_SHOWNORMAL,
-                            rcNormalPosition = match.Rect
-                        });
+                            rcNormalPosition = savedWindow.Rect
+                        };
+
+                        SetWindowPlacement(match.Handle, ref lpwndpl);
 
                         SetWindowPos(match.Handle, IntPtr.Zero,
                             savedWindow.Left, savedWindow.Top,
                             savedWindow.Right - savedWindow.Left,
                             savedWindow.Bottom - savedWindow.Top,
                             SWP_NOZORDER | SWP_NOACTIVATE);
+
+                        windowsToRestore.Add((match.Handle, savedWindow));
+                        break; // Move to next saved window
                     }
                 }
+            }
+
+            // Restore Z-order: process from back (highest Z) to front (lowest Z)
+            // This brings windows to top in correct order
+            foreach (var (handle, saved) in windowsToRestore.OrderByDescending(w => w.SavedWindow.ZOrder))
+            {
+                SetWindowPos(handle, HWND_TOP,
+                    0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
         }
         
@@ -145,24 +161,21 @@ namespace WinPos
         {
             int length = GetWindowTextLength(hWnd);
             if (length == 0) return string.Empty;
-            
-            // Reuse StringBuilder when possible
+
+            // Reuse char[] buffer when possible
             _windowTextBuffer ??= new StringBuilder(256);
-            
+
             if (_windowTextBuffer.Capacity < length + 1)
                 _windowTextBuffer.Capacity = length + 1;
-            
-            _windowTextBuffer.Clear();
-            NativeMethods.GetWindowText(hWnd, _windowTextBuffer, length + 1);
-            return _windowTextBuffer.ToString();
-        }
 
-        internal static string GetWindowText(nint hWnd)
-        {
-            int length = GetWindowTextLength(hWnd);
-            StringBuilder windowText = new StringBuilder(length + 1);
-            NativeMethods.GetWindowText(hWnd, windowText, windowText.Capacity);
-            return windowText.ToString();
+            _windowTextBuffer.Clear();
+
+            // Allocate a char[] buffer for the API call
+            char[] buffer = new char[length + 1];
+            GetWindowText(hWnd, buffer, length + 1);
+            _windowTextBuffer.Append(buffer, 0, length);
+
+            return _windowTextBuffer.ToString();
         }
 
         internal static string GetProcessNameFromWindow(IntPtr hWnd)
@@ -179,9 +192,14 @@ namespace WinPos
 
                 StringBuilder exePath = new StringBuilder(1024);
                 int bufferSize = exePath.Capacity;
+                char[] exePathBuffer = new char[bufferSize];
 
-                if (QueryFullProcessImageName(processHandle, 0, exePath, ref bufferSize))
+                // Fix: Use StringBuilder for QueryFullProcessImageName, not char[]
+                if (QueryFullProcessImageName(processHandle, 0, exePathBuffer, ref bufferSize))
+                {
+                    exePath.Append(exePathBuffer, 0, bufferSize);
                     return Path.GetFileName(exePath.ToString()).ToLowerInvariant();
+                }
 
                 return "unknown";
             }
@@ -192,7 +210,7 @@ namespace WinPos
             finally
             {
                 if (processHandle != IntPtr.Zero)
-                    NativeMethods.CloseHandle(processHandle);
+                    CloseHandle(processHandle);
             }
         }
 
@@ -225,7 +243,11 @@ namespace WinPos
             {
                 string path = Path.GetTempPath() + "WinPos\\windowPositions.xml";
 
-                if (!File.Exists(path)) return;
+                if (!File.Exists(path))
+                {
+                    SaveWindowPositions();
+                    return;
+                }
 
                 using (var reader = new StreamReader(path))
                 {
